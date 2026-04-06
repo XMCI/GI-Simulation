@@ -1,0 +1,36 @@
+问题记录.md
+GI_SimDemo_phant_mod4.py
+
+# Large data files
+*.npz
+*.mat
+
+# XOP data
+XOPDATA/xop23_Windows_20130607/
+XOPDATA/README.pdf
+XOPDATA/README.pptx
+
+# Spectrums support files
+spectrums/supports/
+
+# Old function versions
+functions/v1/
+
+# Result directories
+results/test1D/
+results/test2D/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+logs/
+*.log
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Claude Code local settings
+.claude/

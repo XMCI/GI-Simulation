@@ -21,7 +21,7 @@ from functions.conv_PSF_v2 import conv_PSF
 from functions.phase_stepping import phase_stepping
 from functions.calc_FCA import calc_FCA
     
-def GI_SimDemo_phant_mod4(config_filename = None): 
+def GI_SimDemo_phant_mod5(config_filename = None): 
     '''
         DESCRIPTION: this function is the example of the main function for GI simulation.
 
@@ -488,6 +488,6 @@ def GI_SimDemo_phant_mod4(config_filename = None):
 
     
 if __name__ == '__main__':
-    # GI_SimDemo_phant_mod4('config_bg')
-    GI_SimDemo_phant_mod4('config_sphere')
+    # GI_SimDemo_phant_mod5('config_bg')
+    GI_SimDemo_phant_mod5('config_sphere')
     

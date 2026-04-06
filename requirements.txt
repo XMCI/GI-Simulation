@@ -1,0 +1,20 @@
+# GI Simulation - Python Dependencies
+# Install with: pip install -r requirements.txt
+#
+# NOTE: CuPy and PyCUDA require a compatible NVIDIA GPU + CUDA toolkit.
+# Choose the cupy package matching your CUDA version:
+#   CUDA 11.x: pip install cupy-cuda11x
+#   CUDA 12.x: pip install cupy-cuda12x
+# See: https://docs.cupy.dev/en/stable/install.html
+
+# Core numerical computation
+numpy
+scipy
+
+# GPU acceleration (CUDA required — see note above)
+cupy-cuda12x
+pycuda
+
+# Utilities
+tqdm
+matplotlib

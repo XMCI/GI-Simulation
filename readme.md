@@ -108,9 +108,11 @@ The simulation supports parameter sweeping via dynamic parameters. Configure `nD
 
 ### 1. Generate Phantom (if needed)
 
+> **Note:** Pre-generated phantom `.npz` files are not included in this repository due to their large file size. You must generate them locally using the scripts below before running any phantom simulation.
+
 Generate 3D sphere phantom with tunable volume fraction:
 
-```python
+```bash
 # For high-packing 3D spheres (parallel, shared memory relaxation)
 python phantom/Sphere_3D_v5.py
 
@@ -118,7 +120,7 @@ python phantom/Sphere_3D_v5.py
 python phantom/SphereFlat.py
 ```
 
-The sphere generator uses a force-directed relaxation algorithm to pack spheres to the target volume fraction, then rasterizes them to a voxel grid and slices into layers.
+The sphere generator uses a force-directed relaxation algorithm to pack spheres to the target volume fraction, then rasterizes them to a voxel grid and slices into layers. The output `.npz` file is saved to the `phantom/` directory and referenced by `phantom` field in the config file (e.g., `phantom = 'Sph_40.0um_0.4_40'`).
 
 ### 2. Configure Parameters
 
@@ -138,11 +140,10 @@ propagationDim = '2D'
 ### 3. Run Simulation
 
 ```python
-from GI_SimDemo_phant_mod5 import GI_SimDemo_phant_mod4
 
 # Run with a config file name (without .py extension)
-GI_SimDemo_phant_mod4('config_sphere')   # Sphere phantom simulation
-GI_SimDemo_phant_mod4('config_bg')       # Background reference simulation
+GI_SimDemo_phant_mod5('config_sphere')   # Sphere phantom simulation
+GI_SimDemo_phant_mod5('config_bg')       # Background reference simulation
 ```
 
 Or directly:
@@ -157,12 +158,24 @@ Results are saved as `.npz` files in the `results/` directory. Jupyter notebooks
 
 ## Dependencies
 
-- **Python 3.x**
-- **NumPy** - Array operations
-- **SciPy** - Interpolation, .mat file I/O
-- **CuPy** - GPU-accelerated computation (requires NVIDIA GPU + CUDA)
-- **tqdm** - Progress bars (phantom generation)
-- **matplotlib** - Visualization (optional)
+Install all required packages via:
+
+```bash
+pip install -r requirements.txt
+```
+
+| Package | Used for |
+|---------|----------|
+| **numpy** | Core array computation |
+| **scipy** | `.mat` file I/O, interpolation (`CubicSpline`, `RGI`), image zoom |
+| **cupy-cuda12x** | GPU-accelerated FFT and array operations (requires NVIDIA GPU + CUDA 12.x) |
+| **pycuda** | GPU memory monitoring (`gpu_memory.py`, `create_grating_v2.py`) |
+| **tqdm** | Progress bars in phantom generation scripts |
+| **matplotlib** | 2D sphere packing visualization (`SphereFlat.py`) |
+
+> **CuPy / PyCUDA**: choose the `cupy-cudaXXx` package matching your installed CUDA version.
+> See [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html) for details.
+> If no GPU is available, set `useDevice = 'CPU'` in the config file to fall back to NumPy.
 
 ## Validation
 

@@ -180,6 +180,8 @@ def relax_sphere_centers(N, R, L_vec, max_iter=1000, dt=0.1, tol=1e-3, verbose=T
                     if verbose:
                         print(f"Converged at iter {it}, max_overlap < {tol}")
                     break
+            else:
+                raise RuntimeError('Sphere packing did not converge; refusing to save an overlapping phantom')
 
         return centers
 
@@ -299,6 +301,8 @@ if __name__ == "__main__":
     n_slice = 40
     N_pixel = 50
     scale_factor = 1
+    if scale_factor != 1:
+        raise ValueError('Only scale_factor=1 has a defined phantom voxel size')
     slice_thickness = N_pixel * dx * scale_factor
     gap = 0
     save_dir = 'phantom'
@@ -342,7 +346,8 @@ if __name__ == "__main__":
             print(f"Finished group {i+1}/{group}")
 
         np.savez(os.path.join(save_dir, save_name),
-                Sph=Sph * scale_factor * dx,
+                Sph=Sph * scale_factor,  # projected voxel counts, converted to metres by the reader
+                dx=dx,
                 gap=gap,
                 slice_thickness=slice_thickness,
                 total_thickness=slice_thickness * n_slice * group,

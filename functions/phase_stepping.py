@@ -43,23 +43,44 @@ def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim,
         2021/11/01 (Chengpeng Wu): first version
     '''
     
-    if not 'noise_flag' in locals():
-        noise_flag = 1
+    for name, value in [('nSteps', nSteps), ('nPeriods', nPeriods)]:
+        if not np.isfinite(value) or int(value) != value or value < 1:
+            raise ValueError(f'{name} must be a positive integer')
+    nSteps, nPeriods = int(nSteps), int(nPeriods)
+    dx = coord.x[0, 1] - coord.x[0, 0]
+    FOV = coord.x.shape[1] * dx
+    samples_per_period = G2.period / dx
+    samples_per_step = samples_per_period / nSteps
+    if not np.isfinite(samples_per_period) or samples_per_period <= 0:
+        raise ValueError('G2 period and sampling interval must be positive and finite')
+    if not np.isclose(samples_per_period, round(samples_per_period), rtol=1e-9, atol=1e-9):
+        raise ValueError('G2 period must be an integer number of samples')
+    if not np.isclose(samples_per_step, round(samples_per_step), rtol=1e-9, atol=1e-9):
+        raise ValueError('Phase step must be an integer number of samples for np.roll')
+    # Use the same integer pixel count as detector(), not arange/ceil.
+    if not np.isfinite(pixel_size) or pixel_size <= 0:
+        raise ValueError('Invalid detector pixel size')
+    pixel_ratio = FOV / pixel_size
+    if not np.isfinite(pixel_ratio) or pixel_ratio < 1:
+        raise ValueError('Invalid detector field of view')
+    n_pixels = int(round(pixel_ratio))
+    if not np.isclose(pixel_ratio, n_pixels, rtol=1e-9, atol=1e-9):
+        raise ValueError('FOV must contain an integer number of detector pixels')
+    if any(n % n_pixels != 0 for n in I1.shape[1:]):
+        raise ValueError('Each detector pixel must contain an integer sample block')
     
     if dim == '1D':
-        FOV = np.amax(coord.x)
-        dx = coord.x[0,1]-coord.x[0,0]
         # vector containing the phase step distances
         s = np.linspace(0, G2.period*nPeriods, nSteps*nPeriods+1)
         s = s[:-1]
 
-        PSC = np.zeros((len(np.arange(0, FOV, pixel_size)), np.size(s)))
+        PSC = np.zeros((n_pixels, np.size(s)))
         g20 = create_grating(G2, E, coord, dim, gpu_flag, logger, abs_flag=1)
 
         for ii in np.arange(0, np.size(s)):
             shift_x = np.round(s[ii] / dx).astype(int)
             g2 = np.roll(g20, shift_x, axis=1)
-            PSC[:,ii] = detector(I1, ER, FOV, pixel_size, g2, dim) # shape: (n_pixels, nSteps)
+            PSC[:,ii] = detector(I1 * g2, ER, FOV, pixel_size, g2, dim) # shape: (n_pixels, nSteps)
 
             print("\r", end="")
             print("Phase stepping: {}% ".format(round((ii+1)/len(np.arange(0, np.size(s)))*100), 2), end="")
@@ -71,21 +92,17 @@ def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim,
             PSC = add_poission_noise(PSC, chi)
         
     elif dim == '2D':
-        FOV = np.amax(coord.x)
-        dx = coord.x[0,1]-coord.x[0,0]
-        dy = coord.y[1,0]-coord.y[0,0]
         # vector containing the phase step distances
         s = np.linspace(0, G2.period*nPeriods, nSteps*nPeriods+1)
         s = s[:-1]
 
-        n_pixels = np.round(FOV/pixel_size).astype(int)
         PSC = np.zeros((np.size(s), n_pixels, n_pixels))
         g20 = create_grating(G2, E, coord, dim, gpu_flag, logger, abs_flag=1) #abs_flag is used to create the absolute value of the grating
         if gpu_flag:
             g20 = cp.asarray(g20)
 
         for ii in np.arange(0, np.size(s)):
-            shift_x = np.round(s[ii] / dy).astype(int)
+            shift_x = np.round(s[ii] / dx).astype(int)
 
             # I2 = np.multiply(I1, g2)
             if gpu_flag:
@@ -123,6 +140,3 @@ def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim,
             PSC = add_poission_noise(PSC, chi)
     
     return PSC
-
-    
-    

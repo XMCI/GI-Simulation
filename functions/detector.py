@@ -24,7 +24,19 @@ def detector(I2, ER, FOV, pixel_size, g2, dim):
             2024/11/27 (Longchao Men): add the 2D mode
             2021/11/01 (Chengpeng Wu): first version
     '''
-    nPixel = np.round(FOV/pixel_size).astype(int)
+    if np.asarray(ER).size != I2.shape[0]:
+        raise ValueError('One detector-response value is required per energy channel')
+    ER = np.asarray(ER).reshape(1, -1)
+    if not np.isfinite(pixel_size) or pixel_size <= 0:
+        raise ValueError('Invalid detector pixel size')
+    ratio = FOV / pixel_size
+    if not np.isfinite(ratio) or ratio < 1:
+        raise ValueError('Invalid detector field of view')
+    nPixel = int(round(ratio))
+    if not np.isclose(ratio, nPixel, rtol=1e-9, atol=1e-9):
+        raise ValueError('FOV must contain an integer number of detector pixels')
+    if any(n % nPixel != 0 for n in I2.shape[1:]):
+        raise ValueError('Each detector pixel must contain an integer sample block')
     ER = np.tile(np.transpose(ER), (1, np.size(I2, 1)))
     # I2 = np.multiply(I1, g2)
     
@@ -84,4 +96,3 @@ def detector(I2, ER, FOV, pixel_size, g2, dim):
         PSC = np.sum(I2, axis=(1, 3))
     
     return PSC
-    

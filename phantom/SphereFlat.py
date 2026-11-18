@@ -77,6 +77,8 @@ def relaxation_pack(num_circles, radius, domain_size,
         
         # 保持边界约束：圆心在 [radius, domain_size-radius]
         centers = np.clip(centers, radius, domain_size - radius)
+    else:
+        raise RuntimeError('Sphere packing did not converge; refusing to save an overlapping phantom')
 
     return centers, overlap_history
 
@@ -96,8 +98,8 @@ def compute_thickness_map(centers, radius, domain_size, grid_resolution):
     - thickness_map: 形状等同 grid_resolution 的二维数组，存储每个像素的厚度
     """
     ny, nx = grid_resolution
-    x = np.linspace(0, domain_size, nx)
-    y = np.linspace(0, domain_size, ny)
+    x = np.linspace(0, domain_size, nx, endpoint=False)
+    y = np.linspace(0, domain_size, ny, endpoint=False)
     xv, yv = np.meshgrid(x, y)
 
     thickness_map = np.zeros_like(xv)
@@ -132,6 +134,7 @@ if __name__ == "__main__":
     tolerance = 1e-7
 
     grid_resolution = (4000, 4000)  # 输出厚度图尺寸
+    dx = domain_size / grid_resolution[1]
     Sph = np.zeros((n_slice, grid_resolution[0], grid_resolution[1]))  # 初始化厚度图
     for i in range(n_slice):
         # 1. 生成互不重叠圆心
@@ -146,7 +149,8 @@ if __name__ == "__main__":
         print(f"第 {i+1} 层的厚度图计算完成")
 
     np.savez(save_dir + 'Sph_' + '200' + 'um_'+str(VF)+'_2D.npz', 
-            Sph=Sph, 
+            Sph=Sph / dx,  # projected voxel counts, not a thickness in metres
+            dx=dx,
             gap=gap, 
             slice_thickness=slice_thickness,
             N_slice = n_slice)

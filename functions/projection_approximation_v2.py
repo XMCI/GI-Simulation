@@ -20,8 +20,8 @@ def fresnel_propagation_in_sample(Wi, lambda_, FOV, dz, phant_used, propa_type, 
         dx = FOV / nP_x
         dy = FOV / nP_y
 
-        fx = np.linspace(-0.5 / dx, 0.5 / dx, nP_x)
-        fy = np.linspace(-0.5 / dy, 0.5 / dy, nP_y)
+        fx = np.fft.fftshift(np.fft.fftfreq(nP_x, d=dx))
+        fy = np.fft.fftshift(np.fft.fftfreq(nP_y, d=dy))
         FX, FY = np.meshgrid(fx, fy, indexing='ij')  # shape (nP_x, nP_y)
 
         Wo = np.zeros_like(Wi, dtype=np.complex128)
@@ -36,9 +36,9 @@ def fresnel_propagation_in_sample(Wi, lambda_, FOV, dz, phant_used, propa_type, 
                 FX_cp = cp.asarray(FX)
                 FY_cp = cp.asarray(FY)
                 
-                H = cp.exp(-1j * cp.pi * lambda_batch * (FX_cp**2 + FY_cp**2) * dz + 1j * 2 * cp.pi / lambda_batch * dz)
+                H = cp.exp(-1j * cp.pi * lambda_batch * (FX_cp**2 + FY_cp**2) * dz)
                 del FX_cp, FY_cp
-                H = cp.fft.fftshift(H, axes=(1, 2))
+                H = cp.fft.ifftshift(H, axes=(1, 2))
 
                 Wi_cp = cp.asarray(Wi[i:i_end, :, :])
                 phant_used_cp = cp.asarray(phant_used[i:i_end, :, :])
@@ -59,8 +59,8 @@ def fresnel_propagation_in_sample(Wi, lambda_, FOV, dz, phant_used, propa_type, 
                 cp._default_memory_pool.free_all_blocks()
 
             else:
-                H = np.exp(-1j * np.pi * lambda_batch * (FX**2 + FY**2) * dz + 1j * 2 * np.pi / lambda_batch * dz)
-                H = np.fft.fftshift(H, axes=(1, 2))
+                H = np.exp(-1j * np.pi * lambda_batch * (FX**2 + FY**2) * dz)
+                H = np.fft.ifftshift(H, axes=(1, 2))
 
                 Wi_batch = np.multiply(Wi[i:i_end, :, :], np.exp(np.multiply(-1j*2*np.pi/lambda_batch, phant_used[i:i_end, :, :])))
                 FWi = np.fft.fftn(Wi_batch, axes=(1, 2))
@@ -88,7 +88,7 @@ def projection_approximation(Wi, E, FOV, L, D, type_, d_s2, phant, n_slice, prop
             - D: distance between G1 and G2, unit: m
             - d_s2: the distance between g2 and sample (the side close to g2),unit: m
             - phant: a struct, containing a slice of the phantom and the material of the phantom and the voxel size of the phantom. The phantom matrix is a binary matrix. The phantom should be located between G1 and G2. If no phant exists, use [] as input.
-            - n_slice: number of slices, which is different from "multi_slice_propagation_mod3". This is equivalent to different thicknesses.
+            - n_slice: must equal the number of stored projected slices.
             - propa_type: propagation type.
             - gpu_flag: logical variable whether using the GPU or not.
         OUTPUT:
@@ -98,15 +98,29 @@ def projection_approximation(Wi, E, FOV, L, D, type_, d_s2, phant, n_slice, prop
         2025/06/01 (Longchao Men): optimize the GPU memory usage
         2024/10/28 (Longchao Men): first version
     '''
+    if not np.isfinite(n_slice) or int(n_slice) != n_slice or n_slice < 1:
+        raise ValueError('n_slice must be a positive integer')
+    n_slice = int(n_slice)
+    if n_slice != phant.phantom.shape[0]:
+        raise ValueError('n_slice must equal the stored slice count; regroup first')
+    if phant.phantom.shape[1:] != Wi.shape[1:]:
+        raise ValueError('Phantom and wavefront transverse shapes differ')
+    if not np.isclose(float(phant.dx) * phant.phantom.shape[2],
+                      FOV, rtol=1e-6, atol=0):
+        raise ValueError('Phantom physical FOV differs from simulation FOV')
     phant_total = phant.phantom # shape: (n_slice, nP_x, nP_y)
     nP_x, nP_y = np.size(phant_total, axis=1), np.size(phant_total, axis=2)
     phant_total = np.expand_dims(phant_total, axis = 1) # shape: (n_slice, 1, nP_x, nP_y)
 
-    n_slice = int(np.round(n_slice))
+    if float(phant.slice_thickness) <= 0 or float(phant.gap) < 0:
+        raise ValueError('Slice thickness must be positive and gap nonnegative')
     if phant.gap == 0:
         z_sample = phant.slice_thickness*n_slice
     else:
         z_sample = phant.slice_thickness*n_slice + phant.gap*(n_slice-1)
+
+    if not np.all(np.isfinite([d_s2, z_sample, D])) or d_s2 < 0 or z_sample <= 0 or z_sample + d_s2 > D:
+        raise ValueError('The sample must fit between G1 and G2')
 
     if not isinstance(E, np.ndarray):
         E = np.array([E]).reshape(1,-1)

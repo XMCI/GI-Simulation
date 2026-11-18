@@ -42,7 +42,7 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
     if dim == '1D':
         nP = np.size(Wi, axis=1)
         dx = FOV / nP
-        fx = np.linspace(-1/2/dx, 1/2/dx, nP).reshape(1,-1)
+        fx = np.fft.fftshift(np.fft.fftfreq(nP, d=dx)).reshape(1,-1)
         fx = np.tile(fx, (np.size(lambda_), 1))
         lambda_ = np.tile(np.transpose(lambda_), (1, nP))
 
@@ -53,8 +53,8 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
                 lambda_ = cp.asarray(lambda_)
                 fx = cp.asarray(fx)
 
-                H = cp.exp(cp.multiply(cp.multiply(cp.multiply(-1j*cp.pi, lambda_), z), fx**2) + 1j*2*cp.pi/lambda_*z)
-                H = cp.fft.fftshift(H, axes=1)
+                H = cp.exp(cp.multiply(cp.multiply(cp.multiply(-1j*cp.pi, lambda_), z), fx**2))
+                H = cp.fft.ifftshift(H, axes=1)
                 FWi = cp.fft.fft(cp.asarray(Wi), axis=1)
                 FWo = cp.multiply(FWi, H)
                 Wo = cp.fft.ifft(FWo, axis=1)
@@ -66,8 +66,8 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
             else:
                 logger.info('Fresnel Propagation...')
 
-                H = np.exp(np.multiply(np.multiply(np.multiply(-1j*np.pi, lambda_), z), fx**2) + 1j*2*np.pi/lambda_*z)
-                H = np.fft.fftshift(H, axes=1)
+                H = np.exp(np.multiply(np.multiply(np.multiply(-1j*np.pi, lambda_), z), fx**2))
+                H = np.fft.ifftshift(H, axes=1)
                 Fwi = np.fft.fft(Wi, axis=1)
                 Fwo = np.multiply(Fwi, H)
                 Wo = np.fft.ifft(Fwo, axis=1)
@@ -78,8 +78,8 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
         dx = FOV / nP_x
         dy = FOV / nP_y
 
-        fx = np.linspace(-0.5 / dx, 0.5 / dx, nP_x)
-        fy = np.linspace(-0.5 / dy, 0.5 / dy, nP_y)
+        fx = np.fft.fftshift(np.fft.fftfreq(nP_x, d=dx))
+        fy = np.fft.fftshift(np.fft.fftfreq(nP_y, d=dy))
         FX, FY = np.meshgrid(fx, fy, indexing='ij')  # shape (nP_x, nP_y)
 
         Wo = np.zeros_like(Wi, dtype=np.complex128)
@@ -93,9 +93,9 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
                 FX_cp = cp.asarray(FX)
                 FY_cp = cp.asarray(FY)
 
-                H = cp.exp(-1j * cp.pi * lb * (FX_cp**2 + FY_cp**2) * D + 1j * 2 * cp.pi / lb * D)
+                H = cp.exp(-1j * cp.pi * lb * (FX_cp**2 + FY_cp**2) * D)
                 del lb, FX_cp, FY_cp
-                H = cp.fft.fftshift(H, axes=(1, 2))
+                H = cp.fft.ifftshift(H, axes=(1, 2))
 
                 Wi_cp = cp.asarray(Wi[i:i_end, :, :])
                 FWi = cp.fft.fftn(Wi_cp, axes=(1, 2))
@@ -114,8 +114,8 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
             
             else:
                 logger.info(f'Fresnel Propagation 2D with CPU: {i_end/nE*100:.1f}%')
-                H = np.exp(-1j * np.pi * lambda_batch * (FX**2 + FY**2) * D + 1j * 2 * np.pi / lambda_batch * D)
-                H = np.fft.fftshift(H, axes=(1, 2))
+                H = np.exp(-1j * np.pi * lambda_batch * (FX**2 + FY**2) * D)
+                H = np.fft.ifftshift(H, axes=(1, 2))
                 FWi = np.fft.fftn(Wi[i:i_end, :, :], axes=(1, 2))
                 FWo = FWi * H
                 Wo[i:i_end, :, :] = np.fft.ifftn(FWo, axes=(1, 2))
@@ -123,4 +123,3 @@ def fresnel_propagation_poly(Wi, E, FOV, L, D, srcType, dim, gpu_flag, logger, b
     cp.cuda.Stream.null.synchronize()
     cp.get_default_memory_pool().free_all_blocks()
     return Wo
-    

@@ -53,17 +53,7 @@ def GI_SimDemo_phant_mod5(config_filename = None):
     # imaging parameters
     para['FOV'] = configs.FOV
     para['nP'] = configs.nP
-    if dim == '1D':
-        x = np.linspace(0, para['FOV'], para['nP']).reshape(1,-1)
-        dx = x[0,1]-x[0,0]
-        coord = configs.Struct(x = x)
-    elif dim == '2D':
-        x = np.linspace(0, para['FOV'], para['nP']).reshape(1,-1)
-        y = np.linspace(0, para['FOV'], para['nP']).reshape(1,-1)
-        dx = x[0,1]-x[0,0]
-        dy = y[0,1]-y[0,0]
-        x, y = np.meshgrid(x, y)
-        coord = configs.Struct(x = x, y = y)
+    # Coordinates are built after dynamic parameters are applied in each iteration.
     
     para['nSteps'] = configs.nSteps
     para['nPeriods'] = configs.nPeriods
@@ -124,7 +114,10 @@ def GI_SimDemo_phant_mod5(config_filename = None):
     spec_file = configs.specFile
     # load the spectrum file from .mat file and reshape it to 1D array
     Spec_file = scipy.io.loadmat(spec_file)
-    Spec = np.reshape(Spec_file['Spec'], (1,-1))
+    Spec_data = np.asarray(Spec_file['Spec'])
+    if Spec_data.ndim != 2 or 1 not in Spec_data.shape:
+        raise ValueError('Spec must be a vector sampled on specRange, not a two-column table')
+    Spec = Spec_data.reshape(1, -1)
 
     # detector parameter
     noise_flag = configs.noiseFlag  
@@ -135,7 +128,19 @@ def GI_SimDemo_phant_mod5(config_filename = None):
     responseFile = configs.responseFile
     # load the detector response file from .mat file and reshape it to 1D array
     ER_file = scipy.io.loadmat(responseFile)
-    ER = np.reshape(ER_file['ER'][0, 0:spec_paras[2]], (1,-1))
+    ER_data = np.asarray(ER_file['ER'])
+    if ER_data.ndim != 2 or 1 not in ER_data.shape:
+        raise ValueError('ER must be a vector sampled on specRange')
+    E_response = para['E'].reshape(-1).copy()
+    ER_response = ER_data.reshape(-1)
+    if Spec.size != E_response.size or ER_response.size != E_response.size:
+        raise ValueError('Spectrum/ER arrays must match the declared energy grid')
+    if np.any(Spec < 0) or not np.all(np.isfinite(Spec)) or Spec.sum() <= 0:
+        raise ValueError('Spectrum must be finite, nonnegative and nonzero')
+    if not np.all(np.isfinite(ER_response)) or np.any(ER_response < 0):
+        raise ValueError('Detector response must be finite and nonnegative')
+    if noise_flag and det_type == 'EnergyIntegral':
+        raise NotImplementedError('Energy-integrating noise requires a compound Poisson model; use noiseFlag=0')
 
     if 'EnergyIntegral' == det_type:
         weight = np.multiply(Spec, para['E'])
@@ -148,8 +153,6 @@ def GI_SimDemo_phant_mod5(config_filename = None):
     weight = weight.T / np.sum(weight.T, axis=0) # normalize the weight
     weight[np.isnan(weight)] = 0 # set the nan value to 0
 
-    E_bar = np.sum(np.multiply(Spec, para['E'])) / np.sum(Spec, axis=1).item()
-    lambda_bar = 1.23964181383 / E_bar * 1e-09
     
     # computing device
     useDevice = configs.useDevice
@@ -236,6 +239,13 @@ def GI_SimDemo_phant_mod5(config_filename = None):
     dynamicNames = configs.dynamicParasNames
     dynamicNames = str.split(dynamicNames,'_')
     assert(len(dynamicNames) == nDynamicParas), 'Error: the number of dynamic paramter names does not equal to nDynamicParas!'
+    unsupported = {'L', 'specRange', 'detType', 'phantomFlag',
+                   'phantom', 'phantMaterial', 'nBits', 'dFG0', 'dFG1', 'dFG2'}
+    bad = unsupported.intersection(dynamicNames)
+    if bad:
+        raise NotImplementedError(f'Dynamic parameters need dependency updates: {sorted(bad)}')
+    if len({'g0Period', 'g1Period', 'g2Period'}.intersection(dynamicNames)) > 1:
+        raise ValueError('Only one coupled grating period may be scanned at a time')
     dynamic_ranges = np.zeros((nDynamicParas, 3))
     dynamic_vars = np.empty([1, nDynamicParas], dtype=object)
     dynamic_lens = np.zeros((1, nDynamicParas), dtype=int)
@@ -309,6 +319,32 @@ def GI_SimDemo_phant_mod5(config_filename = None):
                 para[dynamic_varname] = reshape_vars[0, jj][ii].item()
 
         ## some parameters may change with dynamic parameters
+        integer_names = ['nP', 'nSteps', 'nPeriods'] + (['n_slice'] if phantom_flag else [])
+        for name in integer_names:
+            value = para[name]
+            if not np.isfinite(value) or int(value) != value or value < 1:
+                raise ValueError(f'{name} must be a positive integer')
+            para[name] = int(value)
+        if para['nP'] < 2 or not np.isfinite(para['FOV']) or para['FOV'] <= 0:
+            raise ValueError('FOV must be positive and nP at least 2')
+        x = np.linspace(0, para['FOV'], para['nP'], endpoint=False).reshape(1, -1)
+        if dim == '1D':
+            coord = configs.Struct(x=x)
+        elif dim == '2D':
+            x, y = np.meshgrid(x, x)
+            coord = configs.Struct(x=x, y=y)
+        else:
+            raise ValueError('propagationDim must be 1D or 2D')
+        if phantom_flag and configs.propaMode == 'projection_approxi':
+            if phant.phantom.shape[1:] != (para['nP'], para['nP']):
+                raise ValueError('Phantom and wavefront transverse shapes differ')
+            if not np.isclose(float(phant.dx) * phant.phantom.shape[2],
+                              para['FOV'], rtol=1e-6, atol=0):
+                raise ValueError('Phantom physical FOV differs from simulation FOV')
+        E_step = np.asarray(para['E'], dtype=float).reshape(-1)
+        if not np.all(np.isfinite(E_step)) or np.any(E_step <= 0) or np.any(E_step < E_response[0]) or np.any(E_step > E_response[-1]):
+            raise ValueError('Energy is outside the detector response table')
+        ER_step = np.interp(E_step, E_response, ER_response).reshape(1, -1)
         para['L'] = para['total_length'] / para['M']
         para['D'] = para['total_length'] - para['L']
         if 'geometry' == system_type:
@@ -327,15 +363,18 @@ def GI_SimDemo_phant_mod5(config_filename = None):
                 eta = 2
             elif para['G1'].type == 'pi/2-phase':
                 eta = 1
+            else:
+                raise NotImplementedError('Absorption-grating Talbot order must be specified')
+            mag = para['M'] if para['Source'].type == 'pointsource' else 1.0
             if 'g1Period' in dynamicNames:
-                para['G2'].period = (para['L'] + d) / (eta * para['L']) * para['G1'].period # d is the Talbot distance at design energy of G1, It needs to be defined in advance and now is not considered.
+                para['G2'].period = mag * para['G1'].period / eta
                 para['G0'].period = para['L'] / para['D'] * para['G2'].period
             elif 'g0Period' in dynamicNames:
                 para['G2'].period = para['D'] / para['L'] * para['G0'].period
-                para['G1'].period = (eta * para['L']) / (para['L'] + para['D']) * para['G2'].period
+                para['G1'].period = eta * para['G2'].period / mag
             elif 'g2Period' in dynamicNames:
                 para['G0'].period = para['L'] / para['D'] * para['G2'].period
-                para['G1'].period = (eta * para['L']) / (para['L'] + para['D']) * para['G2'].period
+                para['G1'].period = eta * para['G2'].period / mag
 
         ## Main processes
         # initial wavefront
@@ -343,7 +382,7 @@ def GI_SimDemo_phant_mod5(config_filename = None):
             if not isinstance(para['E'], np.ndarray):
                 wf0 = np.sqrt(para['Source'].intensity) * np.ones((np.size(para['E']), para['nP'])) # shape: (1, nP)
             else:
-                wf0 = weight * np.sqrt(para['Source'].intensity) * np.ones((np.size(para['E']), para['nP'])) # shape: (nE, nP)
+                wf0 = np.sqrt(weight) * np.sqrt(para['Source'].intensity) * np.ones((np.size(para['E']), para['nP'])) # shape: (nE, nP)
         
         elif dim == '2D':
             if not isinstance(para['E'], np.ndarray):
@@ -351,7 +390,7 @@ def GI_SimDemo_phant_mod5(config_filename = None):
             else:
                 if ii == 0:
                     weight = np.expand_dims(weight, 2)
-                wf0 = weight * np.sqrt(para['Source'].intensity) * np.ones((np.size(para['E']), para['nP'], para['nP'])) # shape: (nE, nP, nP)
+                wf0 = np.sqrt(weight) * np.sqrt(para['Source'].intensity) * np.ones((np.size(para['E']), para['nP'], para['nP'])) # shape: (nE, nP, nP)
         
         # wf0 = 2**nbits * wf0 # set the initial wavefront intensity to the maximum of detector
 
@@ -412,7 +451,7 @@ def GI_SimDemo_phant_mod5(config_filename = None):
         # np.save('results//I1.npy', I1)
         
         # phase-stepping and detection
-        PSC_flat = phase_stepping(I1, para['nSteps'], para['nPeriods'], para['E'], coord, para['G2'], ER, para['pixel_size'], para['chi'], dim, gpu_flag, noise_flag, logger)
+        PSC_flat = phase_stepping(I1, para['nSteps'], para['nPeriods'], para['E'], coord, para['G2'], ER_step, para['pixel_size'], para['chi'], dim, gpu_flag, noise_flag, logger)
         # calculate the visibility, sensitivity and autocorrelation length
         amp_all,vis_all,phi_all = calc_FCA(PSC_flat, para['nPeriods'], dim)
         # np.save('results//amp_all.npy', amp_all)
@@ -422,14 +461,24 @@ def GI_SimDemo_phant_mod5(config_filename = None):
         
         print('Dynamic No: '+ str(ii+1)+'/'+ str(np.prod(dynamic_lens)))
         logger.info('Dynamic No: '+ str(ii+1)+'/'+ str(np.prod(dynamic_lens)))
+        if phantom_flag and np.size(para['E']) == 1:
+            energy = float(np.asarray(para['E']).reshape(-1)[0])
+            AutoCorrLen[0, ii] = 1.239842e-9 / energy * para['d_s2'] / para['G2'].period
+        else:
+            AutoCorrLen[0, ii] = np.nan
+        PSC[0, ii] = PSC_flat
+        visTotal[0, ii] = vis_all
+        ampTotal[0, ii] = amp_all
+        phiTotal[0, ii] = phi_all
 
         if dim == '1D':
             # to avoid the edge effect, we discard the first and last two points
             Vis[0,ii] = np.mean(vis_all) 
             Amp[0,ii] = np.mean(amp_all)
-            Phi[0,ii] = np.mean(phi_all)
-            Sen[0,ii] = np.sqrt(2) / Vis[0,ii] / np.sqrt(np.mean(np.sum(PSC_flat, 1)))
-            AutoCorrLen[0,ii] = lambda_bar * para['D'] / para['G2'].period
+            Phi[0,ii] = np.angle(np.mean(np.exp(1j * phi_all)))
+            # Ideal photon-counting, sinusoidal-PSC approximation only.
+            Sen[0,ii] = (np.sqrt(2) / Vis[0,ii] / np.sqrt(np.mean(np.sum(PSC_flat, 1)))
+                         if det_type == 'PhotonCounting' and para['chi'] == 1 else np.nan)
             PSC[0,ii] = PSC_flat
             
             # print some intermediate results
@@ -444,6 +493,11 @@ def GI_SimDemo_phant_mod5(config_filename = None):
             # to avoid the edge effect, we discard the first and last two points
             pad_width = 1  
             new_shape = (vis_all.shape[0] - 2 * pad_width, vis_all.shape[1] - 2 * pad_width)
+            if min(new_shape) < 1:
+                raise ValueError('At least one detector pixel must remain after edge cropping')
+            phi_roi = phi_all[pad_width:-pad_width, pad_width:-pad_width]
+            Phi[0, ii] = np.angle(np.mean(np.exp(1j * phi_roi)))
+            Sen[0, ii] = np.nan
 
             vis_all = vis_all[pad_width:new_shape[0] + pad_width, pad_width:new_shape[1] + pad_width]
             amp_all = amp_all[pad_width:new_shape[0] + pad_width, pad_width:new_shape[1] + pad_width]
@@ -453,7 +507,6 @@ def GI_SimDemo_phant_mod5(config_filename = None):
             VisErr[0,ii] = np.std(vis_all)
             Amp[0,ii] = np.mean(amp_all)
             AmpErr[0,ii] = np.std(amp_all)
-            AutoCorrLen[0,ii] =(1.239842e-9/para['E']) * para['d_s2'] / para['G2'].period
 
             # print some intermediate results
             # print()
@@ -490,4 +543,3 @@ def GI_SimDemo_phant_mod5(config_filename = None):
 if __name__ == '__main__':
     # GI_SimDemo_phant_mod5('config_bg')
     GI_SimDemo_phant_mod5('config_sphere')
-    

@@ -30,9 +30,35 @@ def multi_slice_propagation_mod3(Wi, E, FOV, L, D, type_, d_s2, phant, n_slice, 
         2023/05/04 (Peiyuan Guo): add gpu method 
     '''
 
-    z_sample = np.size(phant.phantom, 0) * phant.dx
+    z_sample = np.size(phant.phantom, 0) * float(phant.dx)
+    if not np.all(np.isfinite([d_s2, z_sample, D])) or d_s2 < 0 or z_sample <= 0 or z_sample + d_s2 > D:
+        raise ValueError('The sample must fit between G1 and G2')
+    nz = phant.phantom.shape[0]
+    if not np.isfinite(n_slice) or int(n_slice) != n_slice or not (1 <= n_slice <= nz):
+        raise ValueError('n_slice must be an integer in [1, number of voxels]')
+    n_slice = int(n_slice)
     phant_sliced = configs.Struct(dx = phant.dx,
                                   material = phant.material)
+
+    if type_ == 'planewave':
+        if propa_type != 'fresnel':
+            raise NotImplementedError('Only Fresnel propagation is supported here')
+        bounds = np.linspace(0, nz, n_slice + 1, dtype=int)
+        Wo = fresnel_propagation_poly(
+            Wi, E, FOV, L, D - z_sample - d_s2,
+            'planewave', dim, gpu_flag, logger
+        )
+        for a, b in zip(bounds[:-1], bounds[1:]):
+            phant_sliced.phantom = phant.phantom[a:b, ...]
+            dz_i = (b - a) * float(phant.dx)
+            Wo = single_slice_propagation_mod3(
+                Wo, E, FOV, L + D - z_sample - d_s2 + a * float(phant.dx),
+                dz_i, 'planewave', phant_sliced, propa_type, dim, gpu_flag, logger
+            )
+        return fresnel_propagation_poly(
+            Wo, E, FOV, L + D - d_s2, d_s2,
+            'planewave', dim, gpu_flag, logger
+        )
     
     if dim == '1D':
         print("multi_slice propagation...")
@@ -54,6 +80,7 @@ def multi_slice_propagation_mod3(Wi, E, FOV, L, D, type_, d_s2, phant, n_slice, 
                 phant_sliced.phantom = phant.phantom[slice_index[ii]:slice_index[ii+1], :]
 
                 z_propagate = L + D - z_sample - d_s2 + slice_index[ii] * phant.dx
+                dz_propagate = (slice_index[ii + 1] - slice_index[ii]) * float(phant.dx)
                 Mi = (z_propagate + dz_propagate) / z_propagate
                 Vo = single_slice_propagation_mod3(Vo, E, FOVi, z_propagate, dz_propagate/Mi, 'pointsource', phant_sliced, propa_type, dim, gpu_flag, logger)
                 FOVi = FOVi * Mi
@@ -66,20 +93,6 @@ def multi_slice_propagation_mod3(Wi, E, FOV, L, D, type_, d_s2, phant, n_slice, 
             ## reshape the plane wave into point source
             Wo = Vo / M
 
-        ## planewave: for debugging, not used in the real experiment
-        elif type_ == 'planewave':
-            if propa_type == 'fresnel' or propa_type == 'quasi-projection':
-                Wo_mid = fresnel_propagation_poly(Wi, E, FOV, L, D-z_sample- d_s2, 'planewave', gpu_flag, logger)
-            wf_mat = np.zeros((n_slice,Wi.shape[2-1]))
-            print('saving the slices')
-            slice_index = np.linspace(0, np.size(phant.phantom, 0), n_slice, dtype=int)
-            for ii in np.arange(0, n_slice):
-                phant_sliced.phantom = phant.phantom[slice_index[ii]:slice_index[ii + 1], :]
-                z_propagate = L + D - z_sample - d_s2 + slice_index[ii] * phant.dx
-                Wo_mid = single_slice_propagation_mod3(Wo_mid,E,FOV,z_propagate,[],'planewave',phant_sliced,propa_type,gpu_flag,logger)
-                wf_mat[ii,:] = Wo_mid
-            if propa_type == 'fresnel' or propa_type == 'quasi-projection':
-                Wo = fresnel_propagation_poly(Wo_mid,E,FOV,L + D - d_s2,d_s2,'planewave',gpu_flag, logger)
     
     elif dim == '2D':
         ## pointsource
@@ -99,6 +112,7 @@ def multi_slice_propagation_mod3(Wi, E, FOV, L, D, type_, d_s2, phant, n_slice, 
                 phant_sliced.phantom = phant.phantom[slice_index[ii]:slice_index[ii+1], :, :]
 
                 z_propagate = L + D - z_sample - d_s2 + slice_index[ii] * phant.dx
+                dz_propagate = (slice_index[ii + 1] - slice_index[ii]) * float(phant.dx)
                 Mi = (z_propagate + dz_propagate) / z_propagate
                 Vo = single_slice_propagation_mod3(Vo, E, FOVi, z_propagate, dz_propagate/Mi, 'pointsource', phant_sliced, propa_type, dim, gpu_flag, logger)
                 FOVi = FOVi * Mi

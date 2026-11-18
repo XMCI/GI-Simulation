@@ -109,7 +109,8 @@ def create_grating(G, E, coord, dim, gpu_flag, logger, abs_flag=0, block_size=5)
             nE = E.shape[1]
         else:
             nE = 1
-        gt = np.zeros((nE, Nx, Ny), dtype=np.complex64)
+        gt = np.zeros((nE, Nx, Ny),
+                      dtype=np.float32 if abs_flag else np.complex64)
 
         x_grid = np.tile(coord.x[0, :][None, :], (Ny, 1))  # shape: (Nx, Ny)
         mask2d = (np.sin(2 * np.pi * x_grid / G.period) > k)  # shape: (Nx, Ny)
@@ -129,7 +130,6 @@ def create_grating(G, E, coord, dim, gpu_flag, logger, abs_flag=0, block_size=5)
                 gt_block = cp.where(mask_gpu, fill_block, gap_block)
                 
                 if abs_flag:
-                    gt = np.zeros((nE, Nx, Ny), dtype=np.float32)
                     chunk_size = 1024  
                     total_cols = gt_block.shape[2]
                     for start in range(0, total_cols, chunk_size):
@@ -139,7 +139,7 @@ def create_grating(G, E, coord, dim, gpu_flag, logger, abs_flag=0, block_size=5)
                         gt_chunk = cp.abs(gt_chunk) ** 2
                         gt_block[:, :, start:end] = gt_chunk.real.astype(np.float32)
                     # gt_block = cp.abs(gt_block)**2
-                gt[e0:e1] = cp.asnumpy(gt_block)
+                gt[e0:e1] = cp.asnumpy(gt_block.real if abs_flag else gt_block)
 
                 gpu_memory(f'Create 2D Grating processing {e1/nE*100:.1f}%', logger)
                 del mask_gpu, fill_block, gap_block, gt_block
@@ -158,7 +158,6 @@ def create_grating(G, E, coord, dim, gpu_flag, logger, abs_flag=0, block_size=5)
                 
                 gt_block = np.where(mask_cpu, fill_block, gap_block)
                 if abs_flag:
-                    gt = np.zeros((nE, Nx, Ny), dtype=np.float32)
                     gt_block = np.abs(gt_block)**2
                 gt[e0:e1] = gt_block
 

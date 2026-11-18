@@ -30,6 +30,7 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
         2024/10/28 (Longchao Men): add the 2D mode
         2023/05/04 (Peiyuan Guo): add gpu method
     '''
+    # Propagate the complex envelope; the common vacuum carrier phase is omitted.
     if not isinstance(E, np.ndarray):
         E = np.array([E]).reshape(1,-1)
     lambda_ = np.multiply(np.divide(1.239842, E), 1e-09).reshape(1,-1)
@@ -48,7 +49,7 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
     if dim == '1D':
         nP = np.size(Wi, axis=1)
         dx = FOV / nP
-        fx = np.linspace(-1/2/dx, 1/2/dx, nP).reshape(1,-1)
+        fx = np.fft.fftshift(np.fft.fftfreq(nP, d=dx)).reshape(1,-1)
         fx = np.tile(fx, (np.size(lambda_), 1))
         lambda_ = np.tile(np.transpose(lambda_), (1, nP))
     
@@ -63,9 +64,10 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
         phant_used = np.zeros_like(x_new)
         phant_interp = interp1d(x_old, np.squeeze(phant_int), kind='nearest', fill_value='extrapolate')
         # the mask is used to select the phantom range in the new grid
-        mask = np.squeeze((x_new >= -nP_phantom/2*phant.dx) & (x_new <= (nP_phantom/2 - 1)*phant.dx))
+        tol = 8 * np.finfo(float).eps * max(FOV, nP_phantom * float(phant.dx))
+        mask = (x_new >= x_old[0] - tol) & (x_new <= x_old[-1] + tol)
         # interpolate the with phantom range 
-        phant_used[mask] = phant_interp(x_new[mask])
+        phant_used[mask] = phant_interp(np.clip(x_new[mask], x_old[0], x_old[-1]))
         del x_old, x_new, phant_interp, mask
         phant_used, complex_refractive_index_term = np.meshgrid(phant_used, complex_refractive_index_term)
         phant_used = np.multiply(phant_used, complex_refractive_index_term)
@@ -83,16 +85,16 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
                 Wi = cp.asarray(Wi)
                 gpu_memory('multi_slice Propagation',logger)
 
-                H = cp.exp(cp.multiply(cp.multiply(cp.multiply(-1j*cp.pi, lambda_), dz), fx**2) + 1j*2*cp.pi/lambda_*dz)
-                H = cp.fft.fftshift(H, axes=1)
+                H = cp.exp(cp.multiply(cp.multiply(cp.multiply(-1j*cp.pi, lambda_), dz), fx**2))
+                H = cp.fft.ifftshift(H, axes=1)
                 Wi = cp.multiply(Wi, cp.exp(cp.multiply(-1j*2*cp.pi/lambda_, phant_used)))
                 FWi = cp.fft.fft(Wi, axis=1)
                 FWo = cp.multiply(FWi, H)
                 Wo = cp.asnumpy(cp.fft.ifft(FWo, axis=1))
                 del H, FWi, FWo
             else:
-                H = np.exp(np.multiply(np.multiply(np.multiply(-1j*np.pi, lambda_), dz), fx**2) + 1j*2*np.pi/lambda_*dz)
-                H = np.fft.fftshift(H, axes=1)
+                H = np.exp(np.multiply(np.multiply(np.multiply(-1j*np.pi, lambda_), dz), fx**2))
+                H = np.fft.ifftshift(H, axes=1)
                 Wi = np.multiply(Wi, np.exp(np.multiply(- 1j*2*np.pi/lambda_, phant_used)))
                 Fwi = np.fft.fft(Wi, axis=1)
                 Fwo = np.multiply(Fwi, H)
@@ -108,9 +110,9 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
         nP_y = np.size(Wi, axis=2)
         dx = FOV / nP_x
         dy = FOV / nP_y
-        fx = np.linspace(-1/2/dx, 1/2/dx, nP_x).reshape(1,-1)
-        fy = np.linspace(-1/2/dy, 1/2/dy, nP_y).reshape(1,-1)
-        fx, fy = np.meshgrid(fx, fy)
+        fx = np.fft.fftshift(np.fft.fftfreq(nP_x, d=dx))
+        fy = np.fft.fftshift(np.fft.fftfreq(nP_y, d=dy))
+        fx, fy = np.meshgrid(fx, fy, indexing='ij')
         fx = np.tile(fx, (np.size(lambda_), 1, 1))
         fy = np.tile(fy, (np.size(lambda_), 1, 1))
         lambda_ = np.tile(np.expand_dims(np.transpose(lambda_), axis=2), (1, nP_x, nP_y))
@@ -127,13 +129,15 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
         x_new = np.squeeze(np.linspace(-FOV/2, FOV/2-dx, nP_x))
         y_new = np.squeeze(np.linspace(-FOV/2, FOV/2-dy, nP_y))
         phant_used = np.zeros((len(x_new), len(y_new)))
-        x_new, y_new = np.meshgrid(x_new, y_new)
+        x_new, y_new = np.meshgrid(x_new, y_new, indexing='ij')
         # select the values in the range of the phantom
-        maskx = (x_new >= -nPx_phantom/2*phant.dx) & (x_new <= (nPx_phantom/2 - 1)*phant.dx)
-        masky = (y_new >= -nPy_phantom/2*phant.dx) & (y_new <= (nPy_phantom/2 - 1)*phant.dx)
+        tol = 8 * np.finfo(float).eps * max(FOV, max(nPx_phantom, nPy_phantom) * float(phant.dx))
+        maskx = (x_new >= x_old[0] - tol) & (x_new <= x_old[-1] + tol)
+        masky = (y_new >= y_old[0] - tol) & (y_new <= y_old[-1] + tol)
         mask = maskx & masky
         # interpolate the with phantom range
-        phant_used[mask] = phant_interp((x_new[mask], y_new[mask]))
+        phant_used[mask] = phant_interp((np.clip(x_new[mask], x_old[0], x_old[-1]),
+                                        np.clip(y_new[mask], y_old[0], y_old[-1])))
         # phant_used = phant_interp((x_new, y_new))
         del x_old, y_old, x_new, y_new, phant_interp, maskx, masky, mask
         complex_refractive_index_term = np.tile(np.expand_dims(np.transpose(complex_refractive_index_term),axis=2), (1, nP_x, nP_y))
@@ -153,20 +157,19 @@ def single_slice_propagation_mod3(Wi, E, FOV, z, dz, type_, phant, propa_type, d
                 Wi = cp.asarray(Wi)
                 gpu_memory('multi_slice Propagation',logger)
 
-                H = cp.exp(cp.multiply(cp.multiply(cp.multiply(-1j*cp.pi, lambda_), dz), fx**2 + fy**2) + 1j*2*cp.pi/lambda_*dz)
-                H = cp.fft.fftshift(H, axes=(1,2))
+                H = cp.exp(cp.multiply(cp.multiply(cp.multiply(-1j*cp.pi, lambda_), dz), fx**2 + fy**2))
+                H = cp.fft.ifftshift(H, axes=(1,2))
                 Wi = cp.multiply(Wi, cp.exp(cp.multiply(-1j*2*cp.pi/lambda_, phant_used)))
                 FWi = cp.fft.fftn(Wi, axes=(1,2))
                 FWo = cp.multiply(FWi, H)
                 Wo = cp.asnumpy(cp.fft.ifftn(FWo, axes=(1,2)))
                 del H, FWi, FWo
             else:
-                H = np.exp(np.multiply(np.multiply(np.multiply(-1j*np.pi, lambda_), dz), fx**2 + fy**2) + 1j*2*np.pi/lambda_*dz)
-                H = np.fft.fftshift(H, axes=(1,2))
+                H = np.exp(np.multiply(np.multiply(np.multiply(-1j*np.pi, lambda_), dz), fx**2 + fy**2))
+                H = np.fft.ifftshift(H, axes=(1,2))
                 Wi = np.multiply(Wi, np.exp(np.multiply(- 1j*2*np.pi/lambda_, phant_used)))
                 Fwi = np.fft.fftn(Wi, axes=(1,2))
                 Fwo = np.multiply(Fwi, H)
                 Wo = np.fft.ifftn(Fwo, axes=(1,2))
 
     return Wo
-    

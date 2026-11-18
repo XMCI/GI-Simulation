@@ -20,7 +20,7 @@ def calc_FCA(psc, nPeriods, dim):
         fft_psc = np.fft.fft(psc, axis=1)
         c0 = np.abs(fft_psc[:, 0]) / nSteps
         c1 = np.abs(fft_psc[:, nPeriods]) / nSteps
-        vis = 2 * c1 / c0
+        vis = np.divide(2 * c1, c0, out=np.full_like(c0, np.nan), where=c0 > 0)
         amp = c0
         phi = np.angle(fft_psc[:, nPeriods])
     
@@ -29,9 +29,8 @@ def calc_FCA(psc, nPeriods, dim):
         fft_psc = np.fft.fft(psc, axis=0)
         c0 = np.abs(fft_psc[0,:,:]) / nSteps
         c1 = np.abs(fft_psc[nPeriods,:,:]) / nSteps
-        vis = 2 * c1 / c0
+        vis = np.divide(2 * c1, c0, out=np.full_like(c0, np.nan), where=c0 > 0)
         amp = c0
         phi = np.angle(fft_psc[nPeriods,:,:])
 
     return amp,vis,phi
-    

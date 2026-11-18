@@ -10,10 +10,12 @@ xi = lambda_*disSG2/g2Period
 print('the autocorrelation length is: ' + f"{xi*10**6:.2f}" + ' um')
 type_ = 'pi'  # type of G1 grating, 'Absorption' or 'pi-phase' or 'pi/2-phase'
 Talbot_order = 5
-if type_ == 'pi' or type_ == 'Absorption':
+if type_ == 'pi':
     eta = 2
 elif type_ == 'pi/2':
     eta = 1
+else:
+    raise NotImplementedError('Absorption-grating Talbot order must be specified')
 
 D = Talbot_order * 1 / 2 * g1Period ** 2 / eta ** 2 / lambda_ # distance between G1 and G2 [unit: m]
 print('the distance between G1 and G2 is: ' + f"{D:.2e}" + ' m')
@@ -52,5 +54,3 @@ print('the estimate volume fraction is: ' + f"{VF:.3f}")
 
 sample_thickness = slice_thickness*n_slice # 改变小球直径会导致样品厚度改变，最终模拟出的暗场需要厚度矫正。
 print('the total sample thickness is: ' + f"{sample_thickness:.2e}" + ' m')
-
-

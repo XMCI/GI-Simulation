@@ -38,7 +38,7 @@ temporary directories; existing simulation files are not overwritten.
 | R11, R12 | Correct array-axis interpolation; implement common plane-wave multislice; use actual integer slice thickness for point-source scaling. Tests cover slabs, asymmetric features, empty point-source samples, and file-to-output execution. |
 | R13 | Use current monochromatic energy and sample exit-to-G2 distance. Background and polychromatic scalar correlation length are NaN. |
 | R15, R16 | Distinguish plane/point-source grating matching, rebuild sampling coordinates per iteration, reject unsupported dependency scans and simultaneous coupled-period scans, validate integer parameters. |
-| R17 | Exact Poisson draws only for unit-gain photon counts; reject EnergyIntegral noise until a compound Poisson model exists. Low-count mean/variance and nonnegative integer outputs are checked. |
+| R17 | PhotonCounting retains exact Poisson draws with chi=1. As of 2026-11-19, EnergyIntegral uses user-selected additive Gaussian noise, PSC + N(0, chi²), with chi the fixed standard deviation in PSC units. This is a phenomenological model, not compound Poisson statistics. |
 | R18, R19 | Reject fractional pixel bins and noninteger roll steps; use dx for x stepping. Preserve the existing per-sample source-intensity convention. Fixed-fluence refinement must scale srcInten by the cell-size ratio (squared in 2D). |
 | R20 | Populate PSC/Phi outputs, use circular phase means, represent unsupported sensitivity by NaN, reject empty cropped ROIs, return NaN visibility at zero signal. |
 
@@ -51,6 +51,21 @@ the physical phantom by a meaningful distance.
 The main simulation's existing output interface uses relative directories, as in
 the shipped configs. Its eval-based save operation still does not support arbitrary
 Windows absolute paths; that independent runtime issue is not changed here.
+
+## Gaussian energy-integrating noise — 2026-11-19
+
+Both shipped configs enable noiseFlag=1 with chi=1. EnergyIntegral adds independent
+zero-mean Gaussian noise after energy summation and pixel integration, without
+rounding or clipping; chi is an absolute standard deviation, not a percentage.
+Set noiseFlag=0 for noiseless simulations. PhotonCounting still requires chi=1.
+The analytic and local-data comparison fixtures explicitly disable noise.
+
+Regression checks cover Gaussian mean/variance at zero and positive signals on
+CPU/GPU in 1D/2D, zero and invalid standard deviations, and both noise modes in
+monochromatic/polychromatic end-to-end runs.
+Validation on 2026-11-19: **102 passed**, no warnings, 12.89 s, using the analytic
+regression command above. The large local-data smoke suite was not rerun for this
+noise-only change.
 
 ## Recorded validation — 2026-11-18
 

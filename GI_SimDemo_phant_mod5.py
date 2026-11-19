@@ -139,8 +139,6 @@ def GI_SimDemo_phant_mod5(config_filename = None):
         raise ValueError('Spectrum must be finite, nonnegative and nonzero')
     if not np.all(np.isfinite(ER_response)) or np.any(ER_response < 0):
         raise ValueError('Detector response must be finite and nonnegative')
-    if noise_flag and det_type == 'EnergyIntegral':
-        raise NotImplementedError('Energy-integrating noise requires a compound Poisson model; use noiseFlag=0')
 
     if 'EnergyIntegral' == det_type:
         weight = np.multiply(Spec, para['E'])
@@ -451,7 +449,7 @@ def GI_SimDemo_phant_mod5(config_filename = None):
         # np.save('results//I1.npy', I1)
         
         # phase-stepping and detection
-        PSC_flat = phase_stepping(I1, para['nSteps'], para['nPeriods'], para['E'], coord, para['G2'], ER_step, para['pixel_size'], para['chi'], dim, gpu_flag, noise_flag, logger)
+        PSC_flat = phase_stepping(I1, para['nSteps'], para['nPeriods'], para['E'], coord, para['G2'], ER_step, para['pixel_size'], para['chi'], dim, gpu_flag, noise_flag, logger, det_type=det_type)
         # calculate the visibility, sensitivity and autocorrelation length
         amp_all,vis_all,phi_all = calc_FCA(PSC_flat, para['nPeriods'], dim)
         # np.save('results//amp_all.npy', amp_all)

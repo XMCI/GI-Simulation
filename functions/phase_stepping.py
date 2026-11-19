@@ -6,11 +6,11 @@ from functions.detector import detector
 from functions.add_poission_noise import add_poission_noise
 import cupy as cp
     
-def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim, gpu_flag, noise_flag, logger): 
+def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim, gpu_flag, noise_flag, logger, det_type='PhotonCounting'):
     '''
         DESCRIPTION: 
             this function performs the phase stepping and the detection of the signal. 
-            Poisson noise is also added at this step.
+            Optional Gaussian (EnergyIntegral) or Poisson (PhotonCounting) noise.
         
         CALL: 
             - I1: incident photon intensity before G2
@@ -30,9 +30,11 @@ def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim,
             - ER: detector response
             - pixel_size: detector pixel size
             - nbits: number of bits
-            - chi: proportionality factor depending on detector properties
+            - chi: Gaussian standard deviation in PSC units for EnergyIntegral;
+                   must be 1 for PhotonCounting
             - gpu_flag: logical variable whether using the GPU or not
-            - noise_flag: add poisson noise or not, if 1 or no input, then add noise
+            - noise_flag: add noise if 1
+            - det_type: EnergyIntegral or PhotonCounting (default)
         OUTPUT:
             - PSC: phase stepping curve
             
@@ -87,9 +89,14 @@ def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim,
             sys.stdout.flush()
         print()
 
-        # add poission noise
+        # Add detector noise after pixel integration and energy summation.
         if noise_flag == 1:
-            PSC = add_poission_noise(PSC, chi)
+            if det_type == 'EnergyIntegral':
+                if not np.isfinite(chi) or chi < 0:
+                    raise ValueError('Gaussian noise std chi must be finite and nonnegative')
+                PSC = PSC + np.random.normal(0.0, chi, size=PSC.shape)
+            else:
+                PSC = add_poission_noise(PSC, chi)
         
     elif dim == '2D':
         # vector containing the phase step distances
@@ -135,8 +142,13 @@ def phase_stepping(I1, nSteps, nPeriods, E, coord, G2, ER, pixel_size, chi, dim,
             sys.stdout.flush()
         print()
         
-        # add poission noise
+        # Add detector noise after pixel integration and energy summation.
         if noise_flag == 1:
-            PSC = add_poission_noise(PSC, chi)
+            if det_type == 'EnergyIntegral':
+                if not np.isfinite(chi) or chi < 0:
+                    raise ValueError('Gaussian noise std chi must be finite and nonnegative')
+                PSC = PSC + np.random.normal(0.0, chi, size=PSC.shape)
+            else:
+                PSC = add_poission_noise(PSC, chi)
     
     return PSC

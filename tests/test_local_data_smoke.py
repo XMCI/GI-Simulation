@@ -76,6 +76,7 @@ def test_actual_data_background_and_sample_cpu_gpu(physical_inputs, monkeypatch,
             config.nSlice = int(metadata['N_slice'])
             config.disSG2 = .3
             config.useDevice = device
+            config.noiseFlag = 0  # Compare deterministic CPU/GPU propagation.
             config.outputDir, config.logDir = 'output/', 'logs/'
             config.outputFilename = name
             config.outputParasNames = 'PSC_Vis_Amp_Phi_Sen_AutoCorrLen'

@@ -290,6 +290,47 @@ def test_poisson_low_counts_nonnegative_mean_variance():
         add_poission_noise(np.ones(4), 2.)
 
 
+@pytest.mark.parametrize('gpu', BACKENDS)
+@pytest.mark.parametrize('dim', ['1D', '2D'])
+def test_energy_integral_gaussian_statistics_and_zero_std(gpu, dim):
+    n, dx, sigma = (4000 if dim == '1D' else 80), 1.2e-7, 2.3
+    shape = (1, n) if dim == '1D' else (1, n, n)
+    intensity = np.zeros(shape)
+    intensity[..., n//2:] = 10.
+    args = (intensity, 10, 1, 30., coords(n, dx, dim),
+            grating(thickness=0., base_thickness=0.), np.ones((1, 1)), dx)
+    baseline = call(phase_stepping, *args, sigma, dim, gpu, 0, LOGGER,
+                    det_type='EnergyIntegral')
+    state = np.random.get_state()
+    try:
+        np.random.seed(20261119)
+        zero_std = call(phase_stepping, *args, 0., dim, gpu, 1, LOGGER,
+                        det_type='EnergyIntegral')
+        noisy = call(phase_stepping, *args, sigma, dim, gpu, 1, LOGGER,
+                     det_type='EnergyIntegral')
+    finally:
+        np.random.set_state(state)
+    assert_allclose(zero_std, baseline, rtol=0, atol=0)
+    assert noisy.shape == baseline.shape
+    # Both dark and illuminated pixels must have the same additive noise scale.
+    for mask in [baseline == 0, baseline > 0]:
+        residual = (noisy-baseline)[mask]
+        assert abs(residual.mean()) < 6*sigma/np.sqrt(residual.size)
+        assert abs(residual.var()/sigma**2-1) < 6*np.sqrt(2/(residual.size-1))
+    assert np.any(noisy[baseline == 0] < 0)  # No clipping bias at zero signal.
+    assert np.any(noisy != np.floor(noisy))  # Analog signal is not rounded.
+
+
+@pytest.mark.parametrize('dim', ['1D', '2D'])
+@pytest.mark.parametrize('chi', [-1., np.nan, np.inf])
+def test_energy_integral_rejects_invalid_gaussian_std(dim, chi):
+    shape = (1, 80) if dim == '1D' else (1, 80, 80)
+    with pytest.raises(ValueError, match='Gaussian noise std chi'):
+        call(phase_stepping, np.ones(shape), 10, 1, 30., coords(dim=dim),
+             grating(), np.ones((1, 1)), 2.4e-6, chi, dim, False, 1, LOGGER,
+             det_type='EnergyIntegral')
+
+
 @pytest.mark.parametrize('dim', ['1D', '2D'])
 def test_fca_cosine_and_zero_signal(dim):
     psc = 10*(1+.3*np.cos(2*np.pi*np.arange(30)/10+.7))
@@ -367,6 +408,7 @@ def run_simulation(data_dir):
                 setattr(config, key, value)
         config.nP, config.FOV, config.pixelSize = 80, 9.6e-6, 2.4e-6
         config.useDevice = 'CPU'
+        config.noiseFlag = 0  # Analytic comparisons use noiseless data by default.
         # Match the existing relative-path output interface used by shipped configs.
         config.outputDir = 'outputs/'
         config.logDir = 'logs/'
@@ -467,14 +509,39 @@ def test_invalid_scans_and_noise_models_rejected(run_simulation):
     with pytest.raises(ValueError, match='one coupled'):
         run_simulation(nDynamicParas=2, dynamicParasNames='g1Period_g2Period',
                        dynamicRange1=[4.8e-6], dynamicRange2=[2.4e-6])
-    with pytest.raises(NotImplementedError, match='compound Poisson'):
-        run_simulation(noiseFlag=1)
+    with pytest.raises(ValueError, match='fac=1'):
+        run_simulation(noiseFlag=1, detType='PhotonCounting', chi=2.)
     with pytest.raises(ValueError, match='match the declared energy grid'):
         run_simulation(response=[1., 1.])
     with pytest.raises(ValueError, match='outside the detector'):
         run_simulation(dynamicRange1=[50])
     with pytest.raises(ValueError, match='nonnegative and nonzero'):
         run_simulation(spec=[0, 0, 0, 0, 0, 0])
+
+
+@pytest.mark.parametrize('dim', ['1D', '2D'])
+@pytest.mark.parametrize('det_type', ['EnergyIntegral', 'PhotonCounting'])
+@pytest.mark.parametrize('polychromatic', [False, True])
+def test_noise_modes_full_pipeline(run_simulation, dim, det_type, polychromatic):
+    options = dict(propagationDim=dim, detType=det_type,
+                   chi=2.3 if det_type == 'EnergyIntegral' else 1.)
+    if polychromatic:
+        options.update(dynamicParasNames='srcInten', dynamicRange1=[100])
+    baseline = run_simulation(noiseFlag=0, **options)['PSC'][0, 0]
+    state = np.random.get_state()
+    try:
+        np.random.seed(20261119)
+        noisy = run_simulation(noiseFlag=1, **options)['PSC'][0, 0]
+    finally:
+        np.random.set_state(state)
+    assert noisy.shape == baseline.shape
+    assert np.all(np.isfinite(noisy))
+    assert not np.array_equal(noisy, baseline)
+    if det_type == 'PhotonCounting':
+        assert np.all(noisy >= 0)
+        assert np.all(noisy == np.floor(noisy))
+    else:
+        assert np.any(noisy != np.floor(noisy))
 
 
 def test_phantom_pipeline_autocorrelation_and_uniform_transmission(run_simulation, data_dir):

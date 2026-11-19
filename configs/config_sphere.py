@@ -65,9 +65,9 @@ g2BaseThickness = 250e-6      # thickness of base material [unit: m]
 detType = 'EnergyIntegral' # type of detector, 'EnergyIntegral' or 'PhotonCounting'
 pixelSize = 1.2e-4      # pixel size of the detector [unit: m]
 nBits = 16               # number of bits in the detector data (not used)
-chi = 1                  # proportionality factor depending on detector properties
+chi = 1                  # EnergyIntegral: Gaussian std in PSC units; PhotonCounting: must be 1
 responseFile = 'spectrums/ER_60.mat'  # file path of the detector response, variable name as 'ER'; 要与能谱对应！！
-noiseFlag = 0           # flag for adding poisson noise, 1 or 0
+noiseFlag = 1           # add Gaussian (EnergyIntegral) or Poisson (PhotonCounting) noise
 
 # Phantom parameters
 phantomFlag = 1          # flag for if a phantom is used, 1 or 0
